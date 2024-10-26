@@ -2,10 +2,12 @@ import { ObjectId } from "mongodb";
 
 import { Router, getExpressRouter } from "./framework/router";
 
-import { Authing, Friending, Posting, Sessioning } from "./app";
+import { Authing, Friending, Labelling, Sessioning, Sorting, Sourcing } from "./app";
 import { PostOptions } from "./concepts/posting";
 import { SessionDoc } from "./concepts/sessioning";
 import Responses from "./responses";
+
+import { Label, SourceTarget } from "./concepts/types";
 
 import { z } from "zod";
 
@@ -70,41 +72,49 @@ class Routes {
     return { msg: "Logged out!" };
   }
 
+  /*****
+   * Posting
+   */
+
   @Router.get("/posts")
   @Router.validate(z.object({ author: z.string().optional() }))
   async getPosts(author?: string) {
-    let posts;
-    if (author) {
-      const id = (await Authing.getUserByUsername(author))._id;
-      posts = await Posting.getByAuthor(id);
-    } else {
-      posts = await Posting.getPosts();
-    }
-    return Responses.posts(posts);
+    // let posts;
+    // if (author) {
+    //   const id = (await Authing.getUserByUsername(author))._id;
+    //   posts = await Posting.getByAuthor(id);
+    // } else {
+    //   posts = await Posting.getPosts();
+    // }
+    // // return Responses.posts(posts);
   }
 
   @Router.post("/posts")
   async createPost(session: SessionDoc, content: string, options?: PostOptions) {
     const user = Sessioning.getUser(session);
-    const created = await Posting.create(user, content, options);
-    return { msg: created.msg, post: await Responses.post(created.post) };
+    // const created = await Posting.create(user, content, options);
+    // return { msg: created.msg, post: await Responses.post(created.post) };
   }
 
   @Router.patch("/posts/:id")
   async updatePost(session: SessionDoc, id: string, content?: string, options?: PostOptions) {
-    const user = Sessioning.getUser(session);
-    const oid = new ObjectId(id);
-    await Posting.assertAuthorIsUser(oid, user);
-    return await Posting.update(oid, content, options);
+    // const user = Sessioning.getUser(session);
+    // const oid = new ObjectId(id);
+    // await Posting.assertAuthorIsUser(oid, user);
+    // return await Posting.update(oid, content, options);
   }
 
   @Router.delete("/posts/:id")
   async deletePost(session: SessionDoc, id: string) {
-    const user = Sessioning.getUser(session);
-    const oid = new ObjectId(id);
-    await Posting.assertAuthorIsUser(oid, user);
-    return Posting.delete(oid);
+    // const user = Sessioning.getUser(session);
+    // const oid = new ObjectId(id);
+    // await Posting.assertAuthorIsUser(oid, user);
+    // // return Posting.delete(oid);
   }
+
+  /*****
+   * Friending
+   */
 
   @Router.get("/friends")
   async getFriends(session: SessionDoc) {
@@ -152,6 +162,76 @@ class Routes {
     const fromOid = (await Authing.getUserByUsername(from))._id;
     return await Friending.rejectRequest(fromOid, user);
   }
+
+  /*****
+   * Sourcing
+   */
+
+  @Router.post("/source/:target")
+  async addSource(session: SessionDoc, uri: string, target: SourceTarget): Promise<ObjectId> {
+    const user = Sessioning.getUser(session);
+    return await Sourcing.register(target, uri, user);
+  }
+
+  @Router.get("/source/:sourceId")
+  async getSourceContent(session: SessionDoc, sourceId: ObjectId) {
+    const user = Sessioning.getUser(session);
+    return await Sourcing.lookup(sourceId, user);
+  }
+
+  @Router.delete("/source/:sourceId")
+  async removeSource(session: SessionDoc, sourceId: ObjectId) {
+    const user = Sessioning.getUser(session);
+    return await Sourcing.unregister(sourceId, user);
+  }
+
+  /*****
+   * Labelling
+   */
+
+  @Router.post("/label/:label/:weight")
+  @Router.validate(z.object({ label: z.string(), weight: z.number() }))
+  async newLabel(session: SessionDoc, label: Label, weight: number) {
+    const user = Sessioning.getUser(session);
+    const labelId = await Labelling.register(label, user);
+    return await Sorting.add(labelId, label, weight, user);
+  }
+
+  @Router.put("/label/:label/:weight")
+  @Router.validate(z.object({ label: z.string(), weight: z.number() }))
+  async setLabel(session: SessionDoc, label: Label, weight: number) {
+    const user = Sessioning.getUser(session);
+    const labelId = await Labelling.lookup(label, user);
+    return await Sorting.set(labelId._id, label, weight, user);
+  }
+
+  // @Router.delete("/label/:label")
+  // @Router.validate(z.object({ label: z.string() }))
+  // async deleteLabel(session: SessionDoc, label: Label) {
+  //   const user = Sessioning.getUser(session);
+  //   const la
+  // }
+
+  @Router.put("/label/:label/:postID")
+  @Router.validate(z.object({ label: z.string() }))
+  async addLabel(session: SessionDoc, label: string, postID: ObjectId) {
+    const user = Sessioning.getUser(session);
+    return await Labelling.add(postID, label, user);
+  }
+
+  /*****
+   * Templating
+   */
+
+  @Router.put("/template/:targets")
+  async addTemplate(session: SessionDoc, targets: SourceTarget[]) {}
+
+  /*****
+   * Sorting
+   */
+
+  @Router.put("/template/remove/:id")
+  async removeTemplate(session: SessionDoc, id: string) {}
 }
 
 /** The web app. */

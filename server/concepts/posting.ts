@@ -1,5 +1,4 @@
-import { ObjectId } from "mongodb";
-
+import { Filter, ObjectId } from "mongodb";
 import DocCollection, { BaseDoc } from "../framework/doc";
 import { NotAllowedError, NotFoundError } from "./errors";
 
@@ -9,65 +8,114 @@ export interface PostOptions {
 
 export interface PostDoc extends BaseDoc {
   author: ObjectId;
-  content: string;
+  content: ObjectId;
   options?: PostOptions;
+}
+
+export interface FeedDoc extends BaseDoc {
+  name: string;
+  posts: DocCollection<PostDoc>;
 }
 
 /**
  * concept: Posting [Author]
  */
 export default class PostingConcept {
-  public readonly posts: DocCollection<PostDoc>;
+  public readonly feeds: DocCollection<FeedDoc>;
 
   /**
    * Make an instance of Posting.
    */
   constructor(collectionName: string) {
-    this.posts = new DocCollection<PostDoc>(collectionName);
+    this.feeds = new DocCollection<FeedDoc>(collectionName);
   }
 
-  async create(author: ObjectId, content: string, options?: PostOptions) {
-    const _id = await this.posts.createOne({ author, content, options });
-    return { msg: "Post successfully created!", post: await this.posts.readOne({ _id }) };
-  }
-
-  async getPosts() {
-    // Returns all posts! You might want to page for better client performance
-    return await this.posts.readMany({}, { sort: { _id: -1 } });
-  }
-
-  async getByAuthor(author: ObjectId) {
-    return await this.posts.readMany({ author });
-  }
-
-  async update(_id: ObjectId, content?: string, options?: PostOptions) {
-    // Note that if content or options is undefined, those fields will *not* be updated
-    // since undefined values for partialUpdateOne are ignored.
-    await this.posts.partialUpdateOne({ _id }, { content, options });
-    return { msg: "Post successfully updated!" };
-  }
-
-  async delete(_id: ObjectId) {
-    await this.posts.deleteOne({ _id });
-    return { msg: "Post deleted successfully!" };
-  }
-
-  async assertAuthorIsUser(_id: ObjectId, user: ObjectId) {
-    const post = await this.posts.readOne({ _id });
-    if (!post) {
-      throw new NotFoundError(`Post ${_id} does not exist!`);
+  async register(name: string): Promise<ObjectId> {
+    // id not in feedIDs
+    // n not in feedIDs.name
+    // feedIDs += id
+    // id.feed := {}
+    // id.name := n
+    const feed = await this.feeds.readOne({ name });
+    if (feed != null) {
+      throw new FeedNotAllowedError({ name });
     }
-    if (post.author.toString() !== user.toString()) {
-      throw new PostAuthorNotMatchError(user, _id);
+    return await this.feeds.createOne({ name: name, posts: new DocCollection<PostDoc>(name) });
+  }
+
+  async unregister(id: ObjectId): Promise<void> {
+    // id in feedIDs
+    // id.name := none
+    // id.feed := none
+    // feedIDs -= id
+    const feed = await this.feeds.readOne(id);
+    if (feed == null) {
+      throw new FeedNotFoundError(id);
     }
+    await this.feeds.deleteOne(id);
+  }
+
+  async post(feedId: ObjectId, author: ObjectId, content: ObjectId, options?: PostOptions): Promise<void> {
+    // fID in feedIDs
+    // rID not in fID.feed
+    // fID.feed += rID
+    const feed = await this.feeds.readOne(feedId);
+    if (feed == null) {
+      throw new FeedNotFoundError(feedId);
+    }
+    await feed.posts.createOne({ author, content, options });
+  }
+
+  async unpost(feedId: ObjectId, postId: ObjectId) {
+    // unpost(fID: String, rID: String)
+    //   fID in feedIDs
+    //   rID in fID.feed
+    //   fID.feed -= rID
+    const feed = await this.feeds.readOne(feedId);
+    if (feed == null) {
+      throw new FeedNotFoundError(feedId);
+    }
+    const post = await feed.posts.readOne(postId);
+    if (post == null) {
+      throw new PostNotFoundError(postId);
+    }
+    await this.feeds.deleteOne(postId);
+  }
+
+  async get(feedId: ObjectId): Promise<Set<PostDoc>> {
+    // get(id: String, out f: set String)
+    //   id in feedIDs
+    //   f := id.feed
+    const feed = await this.feeds.readOne(feedId);
+    if (feed == null) {
+      throw new FeedNotFoundError(feedId);
+    }
+    const posts = await feed.posts.readMany({});
+
+    return new Set<PostDoc>(posts);
   }
 }
 
-export class PostAuthorNotMatchError extends NotAllowedError {
-  constructor(
-    public readonly author: ObjectId,
-    public readonly _id: ObjectId,
-  ) {
-    super("{0} is not the author of post {1}!", author, _id);
+export class FeedNotFoundError extends NotFoundError {
+  constructor(public readonly _filter: Filter<FeedDoc>) {
+    super("{0}: Feed with filter {1} is not found!", NotFoundError.HTTP_CODE, _filter);
+  }
+}
+
+export class FeedNotAllowedError extends NotAllowedError {
+  constructor(public readonly _filter: Filter<FeedDoc>) {
+    super("{0}: Feed with filter {1} is not allowed, as it already exists!", NotFoundError.HTTP_CODE, _filter);
+  }
+}
+
+export class PostNotFoundError extends NotFoundError {
+  constructor(public readonly _filter: Filter<PostDoc>) {
+    super("{0}: Post with filter {1} is not found!", NotFoundError.HTTP_CODE, _filter);
+  }
+}
+
+export class PostNotAllowedError extends NotAllowedError {
+  constructor(public readonly _filter: Filter<PostDoc>) {
+    super("{0}: Post with filter {1} is not allowed, as it already exists!", NotFoundError.HTTP_CODE, _filter);
   }
 }

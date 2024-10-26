@@ -1,6 +1,11 @@
 import { Authing } from "./app";
+import { LabelNotAllowedError, LabelNotFoundError } from "./concepts/errors";
 import { AlreadyFriendsError, FriendNotFoundError, FriendRequestAlreadyExistsError, FriendRequestDoc, FriendRequestNotFoundError } from "./concepts/friending";
-import { PostAuthorNotMatchError, PostDoc } from "./concepts/posting";
+import { ResourceNotAllowedError, ResourceNotFoundError } from "./concepts/labelling";
+import { FeedNotAllowedError, FeedNotFoundError, PostDoc, PostNotAllowedError, PostNotFoundError } from "./concepts/posting";
+import { SortNotAllowedError, SortNotFoundError } from "./concepts/sorting";
+import { ContentNotAllowedError, ContentNotFoundError, SourceNotAllowedError, SourceNotFoundError } from "./concepts/sourcing";
+import { RenderNotAllowedError, RenderNotFoundError, TemplateNotAllowedError, TemplateNotFoundError } from "./concepts/templating";
 import { Router } from "./framework/router";
 
 /**
@@ -39,11 +44,6 @@ export default class Responses {
   }
 }
 
-Router.registerError(PostAuthorNotMatchError, async (e) => {
-  const username = (await Authing.getUserById(e.author)).username;
-  return e.formatWith(username, e._id);
-});
-
 Router.registerError(FriendRequestAlreadyExistsError, async (e) => {
   const [user1, user2] = await Promise.all([Authing.getUserById(e.from), Authing.getUserById(e.to)]);
   return e.formatWith(user1.username, user2.username);
@@ -62,4 +62,76 @@ Router.registerError(FriendRequestNotFoundError, async (e) => {
 Router.registerError(AlreadyFriendsError, async (e) => {
   const [user1, user2] = await Promise.all([Authing.getUserById(e.user1), Authing.getUserById(e.user2)]);
   return e.formatWith(user1.username, user2.username);
+});
+
+Router.registerError(FeedNotFoundError, async (e) => {
+  return e.formatWith(e._filter);
+});
+
+Router.registerError(FeedNotAllowedError, async (e) => {
+  return e.formatWith(e._filter);
+});
+
+Router.registerError(PostNotFoundError, async (e) => {
+  return e.formatWith(e._filter);
+});
+
+Router.registerError(PostNotAllowedError, async (e) => {
+  return e.formatWith(e._filter);
+});
+
+Router.registerError(LabelNotAllowedError, async (e) => {
+  return e.formatWith(e.label);
+});
+
+Router.registerError(LabelNotFoundError, async (e) => {
+  return e.formatWith(e.label);
+});
+
+Router.registerError(ResourceNotAllowedError, async (e) => {
+  return e.formatWith(e.resource);
+});
+
+Router.registerError(ResourceNotFoundError, async (e) => {
+  return e.formatWith(e.resource);
+});
+
+Router.registerError(SourceNotFoundError, async (e) => {
+  return e.formatWith(e._filter);
+});
+
+Router.registerError(SourceNotAllowedError, async (e) => {
+  return e.formatWith(e._filter);
+});
+
+Router.registerError(ContentNotFoundError, async (e) => {
+  return e.formatWith(e._filter);
+});
+
+Router.registerError(ContentNotAllowedError, async (e) => {
+  return e.formatWith(e._filter);
+});
+
+Router.registerError(TemplateNotAllowedError, async (e) => {
+  return e.formatWith(e._id);
+});
+
+Router.registerError(TemplateNotFoundError, async (e) => {
+  return e.formatWith(e._id);
+});
+
+Router.registerError(RenderNotFoundError, async (e) => {
+  return e.formatWith(e._id);
+});
+
+Router.registerError(RenderNotAllowedError, async (e) => {
+  return e.formatWith(e._id);
+});
+
+Router.registerError(SortNotFoundError, async (e) => {
+  return e.formatWith(e.sort);
+});
+
+Router.registerError(SortNotAllowedError, async (e) => {
+  return e.formatWith(e.sort);
 });
