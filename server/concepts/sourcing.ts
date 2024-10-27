@@ -64,16 +64,25 @@ export default class SourcingConcept {
     await this.sources.deleteOne(sourceID);
   }
 
-  async lookup(sourceID: ObjectId, user: ObjectId): Promise<SourceDoc> {
+  async lookupSource(sourceID: ObjectId, user: ObjectId): Promise<SourceDoc> {
     // id in sourceIDs
     // t := id.sources
     await this.assertSourceExists(sourceID); // When uncommented, the linter does not recognize the assert
-    const result = await this.sources.readOne(sourceID);
+    const result = await this.sources.readOne({ sourceID, user });
     if (result == null) {
       throw new SourceNotFoundError(sourceID);
     }
 
     await this.assertUserOwns(result, user);
+    return result;
+  }
+
+  async lookupSources(user: ObjectId): Promise<SourceDoc[]> {
+    const result = await this.sources.readMany({ user });
+    if (result == null) {
+      throw new SourceNotFoundError({ user });
+    }
+
     return result;
   }
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import PostListComponent from "@/components/Post/PostListComponent.vue";
-import SourceForm from "@/components/Source/SourceForm.vue";
+import SourceListComponent from "@/components/Source/SourceListComponent.vue";
 import { useUserStore } from "@/stores/user";
 import { storeToRefs } from "pinia";
 
@@ -18,7 +18,7 @@ const { currentUsername, isLoggedIn } = storeToRefs(useUserStore());
       <h1>My Dashboard</h1>
       <section id="source">
         <h2>Source</h2>
-        <SourceForm />
+        <SourceListComponent />
       </section>
       <section id="template">
         <h2>Template</h2>

@@ -169,15 +169,21 @@ class Routes {
    */
 
   @Router.post("/source/:target")
-  async addSource(session: SessionDoc, uri: string, target: SourceTarget): Promise<ObjectId> {
+  async addSource(session: SessionDoc, path_uri: string, target: SourceTarget): Promise<ObjectId> {
     const user = Sessioning.getUser(session);
-    return await Sourcing.register(target, uri, user);
+    return await Sourcing.register(target, path_uri, user);
+  }
+
+  @Router.get("/source")
+  async getSources(session: SessionDoc) {
+    const user = Sessioning.getUser(session);
+    return await Sourcing.lookupSources(user);
   }
 
   @Router.get("/source/:sourceId")
   async getSourceContent(session: SessionDoc, sourceId: ObjectId) {
     const user = Sessioning.getUser(session);
-    return await Sourcing.lookup(sourceId, user);
+    return await Sourcing.lookupSource(sourceId, user);
   }
 
   @Router.delete("/source/:sourceId")
