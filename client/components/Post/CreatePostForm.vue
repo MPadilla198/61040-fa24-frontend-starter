@@ -10,7 +10,7 @@ const createPost = async (content: string) => {
     await fetchy("/api/posts", "POST", {
       body: { content },
     });
-  } catch (_) {
+  } catch {
     return;
   }
   emit("refreshPosts");

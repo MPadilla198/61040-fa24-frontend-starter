@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { ObjectId } from "mongodb";
 
 import { Router, getExpressRouter } from "./framework/router";
