@@ -1,6 +1,6 @@
-import { ObjectId } from "mongodb";
+import { DeleteResult, Filter, ObjectId, UpdateResult } from "mongodb";
 import DocCollection, { BaseDoc } from "../framework/doc";
-import { BadValuesError, NotAllowedError, NotFoundError } from "./errors";
+import { BadValuesError, NotAllowedError, NotFoundError } from "../framework/errors";
 
 export interface UserDoc extends BaseDoc {
   username: string;
@@ -23,35 +23,66 @@ export default class AuthenticatingConcept {
     void this.users.collection.createIndex({ username: 1 });
   }
 
-  async create(username: string, password: string) {
+  /**
+   * Register a new `User`.
+   * @param {string} username The new, user-supplied name
+   * @param {string} password The associated, user-supplied password.
+   * @returns {Promise<ObjectId>} The Id associated to the newly created `User`.
+   * @throws {BadValuesError} If either the `username` or `password` are empty.
+   * @throws {UserNotAllowedError} If the `username` already exists as a registered `User`
+   */
+  async register(username: string, password: string): Promise<ObjectId> {
     await this.assertGoodCredentials(username, password);
-    const _id = await this.users.createOne({ username, password });
-    return { msg: "User created successfully!", user: await this.users.readOne({ _id }) };
+    return await this.users.createOne({ username, password });
   }
 
+  /**
+   * Redacts password from given `UserDoc` for public requests.
+   * @param {UserDoc} user
+   * @returns {Omit<UserDoc, "password">}
+   */
   private redactPassword(user: UserDoc): Omit<UserDoc, "password"> {
     // eslint-disable-next-line
     const { password, ...rest } = user;
     return rest;
   }
 
-  async getUserById(_id: ObjectId) {
-    const user = await this.users.readOne({ _id });
-    if (user === null) {
-      throw new NotFoundError(`User not found!`);
+  /**
+   * Gets the `User` instance from its `ObjectId`.
+   * @param {ObjectId} _id
+   * @returns {Promise<Omit<UserDoc, "password">>} A password-less `UserDoc`.
+   * @throws {UserNotFoundError} If a `User` with `_id` does not exist.
+   */
+  async getUserById(_id: ObjectId): Promise<Omit<UserDoc, "password">> {
+    let user = await this.users.readOne({ _id });
+    try {
+      user = await this.users.assertDoesExist(user);
+    } catch (e) {
+      throw e instanceof NotFoundError ? new UserNotFoundError({ _id }) : e;
     }
     return this.redactPassword(user);
   }
 
-  async getUserByUsername(username: string) {
-    const user = await this.users.readOne({ username });
-    if (user === null) {
-      throw new NotFoundError(`User not found!`);
+  /**
+   * @param {string} username The name of a registered `User`.
+   * @returns {Promise<Omit<UserDoc, "password">>}
+   * @throws {UserNotFoundError} If the given `username` does not exist as a registered `User`.
+   */
+  async getUserByUsername(username: string): Promise<Omit<UserDoc, "password">> {
+    let user = await this.users.readOne({ username });
+    try {
+      user = await this.users.assertDoesExist(user);
+    } catch (e) {
+      throw e instanceof NotFoundError ? new UserNotFoundError({ username }) : e;
     }
     return this.redactPassword(user);
   }
 
-  async idsToUsernames(ids: ObjectId[]) {
+  /**
+   * @param {ObjectId[]} ids The Ids of registered `User`s.
+   * @returns {Promise<string[]>} The associated usernames. Invalid Ids will be dropped from the list.
+   */
+  async idsToUsernames(ids: ObjectId[]): Promise<string[]> {
     const users = await this.users.readMany({ _id: { $in: ids } });
 
     // Store strings in Map because ObjectId comparison by reference is wrong
@@ -59,62 +90,114 @@ export default class AuthenticatingConcept {
     return ids.map((id) => idToUser.get(id.toString())?.username ?? "DELETED_USER");
   }
 
-  async getUsers(username?: string) {
-    // If username is undefined, return all users by applying empty filter
+  /**
+   * @param {string} username If given, the scope of the search is limited to a search for `username`.
+   * @returns {Promise<Omit<UserDoc, "password">[]>} If `username` is undefined, return all registered `User`s.
+   */
+  async getUsers(username?: string): Promise<Omit<UserDoc, "password">[]> {
     const filter = username ? { username } : {};
-    const users = (await this.users.readMany(filter)).map(this.redactPassword);
-    return users;
+    return (await this.users.readMany(filter)).map(this.redactPassword);
   }
 
-  async authenticate(username: string, password: string) {
-    const user = await this.users.readOne({ username, password });
-    if (!user) {
-      throw new NotAllowedError("Username or password is incorrect.");
+  /**
+   * Authenticates the given credentials.
+   * @param {string} username The name of a `User`.
+   * @param {string} password The password of `User`.
+   * @returns {Promise<object>} An object describing what was updated.
+   * @throws {UserNotFoundError} If the given `username` and `password` do not match to a registered `User`.
+   */
+  async authenticate(username: string, password: string): Promise<ObjectId> {
+    let user = await this.users.readOne({ username, password });
+    try {
+      user = await this.users.assertDoesExist(user);
+    } catch (e) {
+      throw e instanceof NotFoundError ? new UserNotFoundError({ username, password }) : e;
     }
-    return { msg: "Successfully authenticated.", _id: user._id };
+    return user._id;
   }
 
-  async updateUsername(_id: ObjectId, username: string) {
-    await this.assertUsernameUnique(username);
-    await this.users.partialUpdateOne({ _id }, { username });
-    return { msg: "Username updated successfully!" };
-  }
-
-  async updatePassword(_id: ObjectId, currentPassword: string, newPassword: string) {
-    const user = await this.users.readOne({ _id });
-    if (!user) {
-      throw new NotFoundError("User not found");
-    }
-    if (user.password !== currentPassword) {
-      throw new NotAllowedError("The given current password is wrong!");
+  /**
+   * @param {ObjectId} _id The `ObjectId` of the `User` to update.
+   * @param {string} username The new username for the `User`.
+   * @returns {Promise<UpdateResult<UserDoc>>} An object describing what was updated.
+   * @throws {UserNotAllowedError} If `username` is not unique.
+   */
+  async updateUsername(_id: ObjectId, username: string): Promise<UpdateResult<UserDoc>> {
+    try {
+      await this.assertUsernameUnique(username);
+    } catch (e) {
+      throw e instanceof NotAllowedError ? new UserNotAllowedError({ username }) : e;
     }
 
-    await this.users.partialUpdateOne({ _id }, { password: newPassword });
-    return { msg: "Password updated successfully!" };
+    return await this.users.partialUpdateOne({ _id }, { username });
   }
 
-  async delete(_id: ObjectId) {
-    await this.users.deleteOne({ _id });
-    return { msg: "User deleted!" };
-  }
-
-  async assertUserExists(_id: ObjectId) {
-    const maybeUser = await this.users.readOne({ _id });
-    if (maybeUser === null) {
-      throw new NotFoundError(`User not found!`);
+  /**
+   * Updates the password of a `User` from `currentPassword` to `newPassword`.
+   * @param _id The `ObjectId` of the `User` to update.
+   * @param currentPassword The current password of the `User`.
+   * @param newPassword The password the `User` wishes to update to.
+   * @returns {Promise<UpdateResult<UserDoc>>} An object containing a `msg` field.
+   * @throws {UserNotFoundError} If the supplied `_id` and `currentPassword` do not match to a user.
+   */
+  async updatePassword(_id: ObjectId, currentPassword: string, newPassword: string): Promise<UpdateResult<UserDoc>> {
+    const filter = { _id, currentPassword };
+    const user = await this.users.readOne(filter);
+    try {
+      await this.users.assertDoesExist(user);
+    } catch (e) {
+      throw e instanceof NotFoundError ? new UserNotFoundError(filter) : e;
     }
+
+    return await this.users.partialUpdateOne({ _id }, { password: newPassword });
   }
 
-  private async assertGoodCredentials(username: string, password: string) {
+  /**
+   * Deletes the `User` with `_id`.
+   * @param {ObjectId} _id The `ObjectId` of the `User` to delete.s
+   * @returns {Promise<DeleteResult>} The result of the delete.
+   */
+  async delete(_id: ObjectId): Promise<DeleteResult> {
+    return await this.users.deleteOne({ _id });
+  }
+
+  /**
+   * Verifies the given credentials as suitable for a new `User`.
+   * @param {string} username The name of the new User.
+   * @param {string} password The password of the new User.
+   * @throws {BadValuesError} If `username` or `password` are non-empty.
+   * @throws {UserNotAllowedError} If the `username` is not unique.
+   */
+  private async assertGoodCredentials(username: string, password: string): Promise<void> {
     if (!username || !password) {
       throw new BadValuesError("Username and password must be non-empty!");
     }
     await this.assertUsernameUnique(username);
   }
 
-  private async assertUsernameUnique(username: string) {
-    if (await this.users.readOne({ username })) {
-      throw new NotAllowedError(`User with username ${username} already exists!`);
+  /**
+   * Checks if the `username` currently exists as the name of a `User`.
+   * @param {string} username The name of the `User` to check.
+   * @throws {UserNotAllowedError} If a `User` with name `username` does not exist.
+   */
+  private async assertUsernameUnique(username: string): Promise<void> {
+    const filter = { username };
+    try {
+      await this.users.assertDoesNotExist(await this.users.readOne(filter));
+    } catch (e) {
+      throw e instanceof NotAllowedError ? new UserNotAllowedError(filter) : e;
     }
+  }
+}
+
+export class UserNotFoundError extends NotFoundError {
+  constructor(public readonly filter: Filter<UserDoc>) {
+    super(`${NotFoundError.HTTP_CODE}: User with filter ${filter} not found!`);
+  }
+}
+
+export class UserNotAllowedError extends NotAllowedError {
+  constructor(public readonly filter: Filter<UserDoc>) {
+    super(`${NotAllowedError.HTTP_CODE}: User with filter ${filter} not allowed!`);
   }
 }

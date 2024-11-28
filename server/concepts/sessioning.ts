@@ -1,6 +1,6 @@
 import { SessionData } from "express-session";
 import { ObjectId } from "mongodb";
-import { NotAllowedError, UnauthenticatedError } from "./errors";
+import { NotAllowedError, UnauthenticatedError } from "../framework/errors";
 
 export type SessionDoc = SessionData;
 

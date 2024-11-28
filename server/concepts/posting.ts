@@ -1,6 +1,6 @@
-import { Filter, ObjectId } from "mongodb";
+import { DeleteResult, Filter, ObjectId } from "mongodb";
 import DocCollection, { BaseDoc } from "../framework/doc";
-import { NotAllowedError, NotFoundError } from "./errors";
+import { NotAllowedError, NotFoundError } from "../framework/errors";
 
 export interface PostOptions {
   backgroundColor?: string;
@@ -36,86 +36,101 @@ export default class PostingConcept {
     // feedIDs += id
     // id.feed := {}
     // id.name := n
-    const feed = await this.feeds.readOne({ name });
-    if (feed != null) {
-      throw new FeedNotAllowedError({ name });
+    try {
+      await this.feeds.assertDoesNotExist(await this.feeds.readOne({ name }));
+    } catch (e) {
+      if (e instanceof NotAllowedError) {
+        throw new FeedNotAllowedError({ name });
+      } else {
+        throw e;
+      }
     }
     return await this.feeds.createOne({ name: name, posts: new DocCollection<PostDoc>(name) });
   }
 
-  async unregister(id: ObjectId): Promise<void> {
+  async unregister(id: ObjectId): Promise<DeleteResult> {
     // id in feedIDs
     // id.name := none
     // id.feed := none
     // feedIDs -= id
-    const feed = await this.feeds.readOne(id);
-    if (feed == null) {
-      throw new FeedNotFoundError(id);
+    try {
+      await this.feeds.assertDoesExist(await this.feeds.readOne(id));
+    } catch (e) {
+      if (e instanceof NotFoundError) {
+        throw new FeedNotFoundError(id);
+      } else {
+        throw e;
+      }
     }
-    await this.feeds.deleteOne(id);
+    return await this.feeds.deleteOne(id);
   }
 
-  async post(feedId: ObjectId, author: ObjectId, content: ObjectId, options?: PostOptions): Promise<void> {
+  async post(feedId: ObjectId, author: ObjectId, content: ObjectId, options?: PostOptions): Promise<ObjectId> {
     // fID in feedIDs
     // rID not in fID.feed
     // fID.feed += rID
-    const feed = await this.feeds.readOne(feedId);
-    if (feed == null) {
-      throw new FeedNotFoundError(feedId);
+    try {
+      const feed = await this.feeds.assertDoesExist(await this.feeds.readOne(feedId));
+      return await feed.posts.createOne({ author, content, options });
+    } catch (e) {
+      throw e instanceof NotFoundError ? new FeedNotFoundError(feedId) : e;
     }
-    await feed.posts.createOne({ author, content, options });
   }
 
-  async unpost(feedId: ObjectId, postId: ObjectId) {
+  async unpost(feedId: ObjectId, postId: ObjectId): Promise<DeleteResult> {
     // unpost(fID: String, rID: String)
     //   fID in feedIDs
     //   rID in fID.feed
     //   fID.feed -= rID
-    const feed = await this.feeds.readOne(feedId);
-    if (feed == null) {
-      throw new FeedNotFoundError(feedId);
+    try {
+      const feed = await this.feeds.assertDoesExist(await this.feeds.readOne(feedId));
+      await feed.posts.assertDoesExist(await feed.posts.readOne(postId));
+      return await this.feeds.deleteOne(postId);
+    } catch (e) {
+      if (e instanceof NotFoundError) {
+        throw new FeedNotFoundError(feedId);
+      } else if (e instanceof PostNotFoundError) {
+        throw new PostNotFoundError(postId);
+      } else {
+        throw e;
+      }
     }
-    const post = await feed.posts.readOne(postId);
-    if (post == null) {
-      throw new PostNotFoundError(postId);
-    }
-    await this.feeds.deleteOne(postId);
   }
 
   async get(feedId: ObjectId): Promise<Set<PostDoc>> {
     // get(id: String, out f: set String)
     //   id in feedIDs
     //   f := id.feed
-    const feed = await this.feeds.readOne(feedId);
-    if (feed == null) {
-      throw new FeedNotFoundError(feedId);
+    try {
+      const feed = await this.feeds.assertDoesExist(await this.feeds.readOne(feedId));
+      const posts = await feed.posts.readMany({});
+      return new Set<PostDoc>(posts);
+    } catch (e) {
+      throw e instanceof NotFoundError ? new FeedNotFoundError(feedId) : e;
     }
-    const posts = await feed.posts.readMany({});
-
-    return new Set<PostDoc>(posts);
   }
 }
 
 export class FeedNotFoundError extends NotFoundError {
   constructor(public readonly _filter: Filter<FeedDoc>) {
-    super("{0}: Feed with filter {1} is not found!", NotFoundError.HTTP_CODE, _filter);
+    super(`${NotFoundError.HTTP_CODE}: Feed with filter ${_filter} is not found!`);
   }
 }
 
 export class FeedNotAllowedError extends NotAllowedError {
   constructor(public readonly _filter: Filter<FeedDoc>) {
-    super("{0}: Feed with filter {1} is not allowed, as it already exists!", NotFoundError.HTTP_CODE, _filter);
+    super(`${NotAllowedError.HTTP_CODE}: Feed with filter ${_filter} is not allowed, as it already exists!`);
   }
 }
 
 export class PostNotFoundError extends NotFoundError {
   constructor(public readonly _filter: Filter<PostDoc>) {
-    super("{0}: Post with filter {1} is not found!", NotFoundError.HTTP_CODE, _filter);
+    super(`${NotFoundError.HTTP_CODE}: Post with filter ${_filter} is not found!`);
   }
 }
 
 export class PostNotAllowedError extends NotAllowedError {
   constructor(public readonly _filter: Filter<PostDoc>) {
-    super("{0}: Post with filter {1} is not allowed, as it already exists!", NotFoundError.HTTP_CODE, _filter);
+    super(`${NotFoundError.HTTP_CODE}: Post with filter ${_filter} is not allowed, as it already exists!`);
   }
 }

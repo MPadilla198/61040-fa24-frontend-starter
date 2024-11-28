@@ -3,6 +3,7 @@ import express, { Request, Response } from "express";
 import "reflect-metadata";
 
 import { ZodSchema } from "zod";
+import { BaseResponse } from "../responses";
 
 export type HttpMethod = "all" | "get" | "post" | "put" | "delete" | "patch" | "options" | "head";
 
@@ -66,8 +67,8 @@ export class Router {
     }
   }
 
-  public registerRoute(method: HttpMethod, path: string, action: Function, validator?: ZodSchema) {
-    this.expressRouter[method](path, this.makeRoute(action, validator));
+  public registerRoute(method: HttpMethod, path: string, action: Function, validator?: ZodSchema, requestHeaders?: string[], responseHeaders?: string[]) {
+    this.expressRouter[method](path, this.makeRoute(action, validator, requestHeaders, responseHeaders));
   }
 
   public all(path: string, action: Function) {
@@ -95,7 +96,7 @@ export class Router {
     this.registerRoute("head", path, action);
   }
 
-  private makeRoute(f: Function, validator?: ZodSchema) {
+  private makeRoute(f: Function, validator?: ZodSchema, requestHeaders?: string[], responseHeaders?: string[]) {
     const argNames = getParamNames(f);
 
     return async (req: Request, res: Response) => {
@@ -105,7 +106,6 @@ export class Router {
         }
         const ret = req.params[name] || req.query[name] || req.body[name];
         if (ret === undefined || ret === null) {
-          // TODO: Can we know if this param was required?
           return undefined;
         }
         return ret;
@@ -127,18 +127,26 @@ export class Router {
         }
       }
 
-      let result;
+      let result: BaseResponse | Promise<BaseResponse>;
       try {
         result = f.call(null, ...Object.values(args));
         if (result instanceof Promise) {
-          result = await result;
+          result = (await result) as BaseResponse;
         }
       } catch (e: unknown) {
         const error = (await Router.handleError(e as Error)) as Error & { HTTP_CODE?: number };
         res.status(error.HTTP_CODE ?? 500).json({ msg: error.message ?? "Internal Server Error" });
         return;
       }
-      res.json(result);
+      res.statusCode = result.HTTP_CODE;
+      if (result.body) {
+        res.json(result.body);
+      } else if (result.msg) {
+        res.json(result.msg);
+      }
+      if (result.location) {
+        res.setHeader("Location", result.location.toString());
+      }
     };
   }
 
@@ -176,6 +184,32 @@ export class Router {
   }
 
   /**
+   * (called as a decorator) Require a header to be present for a request to be valid.
+   * @param {string[]} headers
+   * @returns {(originalMethod: Function, context: ClassMethodDecoratorContext<object>) => void}
+   */
+  static requireRequestHeaders(headers: string[]): (originalMethod: Function, context: ClassMethodDecoratorContext<object>) => void {
+    return function (originalMethod: Function, context: ClassMethodDecoratorContext<object>): void {
+      context.addInitializer(function () {
+        Reflect.defineMetadata("requestHeaders", headers, this, context.name);
+      });
+    };
+  }
+
+  /**
+   * (called as a decorator) Require a header to be present for a response to be valid.
+   * @param {string[]} headers
+   * @returns {(originalMethod: Function, context: ClassMethodDecoratorContext<object>) => void}
+   */
+  static requireResponseHeaders(headers: string[]): (originalMethod: Function, context: ClassMethodDecoratorContext<object>) => void {
+    return function (originalMethod: Function, context: ClassMethodDecoratorContext<object>) {
+      context.addInitializer(function () {
+        Reflect.defineMetadata("responseHeaders", headers, this, context.name);
+      });
+    };
+  }
+
+  /**
    * (called as a decorator) Add a validator for client inputs.
    * @param zodSchema Zod "schema" describing types, constraints, and/or coercions
    */
@@ -187,8 +221,14 @@ export class Router {
     };
   }
 
-  private static httpDecorator(method: HttpMethod, route: string) {
-    return function (originalMethod: Function, context: ClassMethodDecoratorContext<object>) {
+  /**
+   *
+   * @param method
+   * @param route
+   * @returns {(originalMethod: Function, context: ClassMethodDecoratorContext<object>) => void}
+   */
+  private static httpDecorator(method: HttpMethod, route: string): (originalMethod: Function, context: ClassMethodDecoratorContext<object>) => void {
+    return function (originalMethod: Function, context: ClassMethodDecoratorContext<object>): void {
       context.addInitializer(function () {
         // For each method decorated with this decorator, save the method and path metadata.
         // This metadata can be accessed later to build the express router.
@@ -199,7 +239,7 @@ export class Router {
   }
 }
 
-function getParamNames(f: Function) {
+function getParamNames(f: Function): string[] {
   return f
     .toString()
     .match(/\((.*?)\)/)![1] // Get list of parameters between the brackets
@@ -225,6 +265,8 @@ export function getExpressRouter(routes: object) {
     const method = Reflect.getMetadata("method", routes, endpoint) as HttpMethod;
     const path = Reflect.getMetadata("path", routes, endpoint) as string;
     const zodSchema = Reflect.getMetadata("zodSchema", routes, endpoint) as ZodSchema | undefined;
+    const reqHeaders = Reflect.getMetadata("requestHeaders", routes, endpoint) as string[];
+    const respHeaders = Reflect.getMetadata("responseHeaders", routes, endpoint) as string[];
 
     // Skip if the method or path is not defined (e.g., when endpoint is the constructor)
     if (!method || !path) {
@@ -234,7 +276,7 @@ export function getExpressRouter(routes: object) {
     // The ugly cast is because TypeScript doesn't know that `routes[endpoint]` is a correct method.
     const action = (routes as Record<string, Function>)[endpoint];
 
-    router.registerRoute(method, path, action, zodSchema);
+    router.registerRoute(method, path, action, zodSchema, reqHeaders, respHeaders);
   }
 
   return router.expressRouter;

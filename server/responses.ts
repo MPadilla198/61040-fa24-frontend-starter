@@ -1,3 +1,4 @@
+import { ObjectId } from "mongodb";
 import { Authing } from "./app";
 import { LabelNotAllowedError, LabelNotFoundError } from "./concepts/errors";
 import { AlreadyFriendsError, FriendNotFoundError, FriendRequestAlreadyExistsError, FriendRequestDoc, FriendRequestNotFoundError } from "./concepts/friending";
@@ -8,6 +9,14 @@ import { ContentNotAllowedError, ContentNotFoundError, SourceNotAllowedError, So
 import { RenderNotAllowedError, RenderNotFoundError, TemplateNotAllowedError, TemplateNotFoundError } from "./concepts/templating";
 import { Router } from "./framework/router";
 
+export type BaseResponse = {
+  HTTP_CODE: number;
+  msg?: string;
+  body?: unknown;
+  location?: ObjectId;
+  [key: string]: unknown;
+};
+
 /**
  * This class does useful conversions for the frontend.
  * For example, it converts a {@link PostDoc} into a more readable format for the frontend.
@@ -15,32 +24,48 @@ import { Router } from "./framework/router";
 export default class Responses {
   /**
    * Convert PostDoc into more readable format for the frontend by converting the author id into a username.
+   * @param {PostDoc} post
+   * @returns {Promise<BaseResponse>} With JSON `body` including `author` and `Post` components.
+   * @throws {UserNotFoundError} If `post.author` does not exist as a registered `User`.
    */
-  static async post(post: PostDoc | null) {
-    if (!post) {
-      return post;
-    }
+  static async post(post: PostDoc): Promise<BaseResponse> {
     const author = await Authing.getUserById(post.author);
-    return { ...post, author: author.username };
+    return {
+      HTTP_CODE: 200,
+      body: {
+        ...post,
+        author: author.username,
+      },
+    };
   }
 
   /**
    * Same as {@link post} but for an array of PostDoc for improved performance.
+   * @param {PostDoc[]} posts
+   * @returns {Promise<BaseResponse>}
    */
-  static async posts(posts: PostDoc[]) {
+  static async posts(posts: PostDoc[]): Promise<BaseResponse> {
     const authors = await Authing.idsToUsernames(posts.map((post) => post.author));
-    return posts.map((post, i) => ({ ...post, author: authors[i] }));
+    return {
+      HTTP_CODE: 200,
+      body: posts.map((post, i) => ({ ...post, author: authors[i] })),
+    };
   }
 
   /**
    * Convert FriendRequestDoc into more readable format for the frontend
    * by converting the ids into usernames.
+   * @param {FriendRequestDoc[]} requests
+   * @returns {Promise<BaseResponse>} With `body` being a list of requests
    */
-  static async friendRequests(requests: FriendRequestDoc[]) {
+  static async friendRequests(requests: FriendRequestDoc[]): Promise<BaseResponse> {
     const from = requests.map((request) => request.from);
     const to = requests.map((request) => request.to);
     const usernames = await Authing.idsToUsernames(from.concat(to));
-    return requests.map((request, i) => ({ ...request, from: usernames[i], to: usernames[i + requests.length] }));
+    return {
+      HTTP_CODE: 200,
+      body: requests.map((request, i) => ({ ...request, from: usernames[i], to: usernames[i + requests.length] })),
+    };
   }
 }
 
@@ -81,19 +106,19 @@ Router.registerError(PostNotAllowedError, async (e) => {
 });
 
 Router.registerError(LabelNotAllowedError, async (e) => {
-  return e.formatWith(e.label);
+  return e.formatWith(e.filter);
 });
 
 Router.registerError(LabelNotFoundError, async (e) => {
-  return e.formatWith(e.label);
+  return e.formatWith(e.filter);
 });
 
 Router.registerError(ResourceNotAllowedError, async (e) => {
-  return e.formatWith(e.resource);
+  return e.formatWith(e.filter);
 });
 
 Router.registerError(ResourceNotFoundError, async (e) => {
-  return e.formatWith(e.resource);
+  return e.formatWith(e.filter);
 });
 
 Router.registerError(SourceNotFoundError, async (e) => {

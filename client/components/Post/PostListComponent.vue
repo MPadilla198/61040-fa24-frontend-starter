@@ -20,7 +20,7 @@ async function getPosts(author?: string) {
   let postResults;
   try {
     postResults = await fetchy("/api/posts", "GET", { query });
-  } catch (_) {
+  } catch {
     return;
   }
   searchAuthor.value = author ? author : "";

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { ObjectId } from "mongodb";
+import { DeleteResult, ObjectId } from "mongodb";
 import DocCollection, { BaseDoc } from "../framework/doc";
-import { NotAllowedError, NotFoundError, NotImplementedError } from "./errors";
+import { NotAllowedError, NotFoundError, NotImplementedError } from "../framework/errors";
 
 export enum TemplateType {
   Markdown,
@@ -52,7 +52,7 @@ export default class TemplatingConcept {
     return _id;
   }
 
-  async remove(template: ObjectId, user: ObjectId): Promise<void> {
+  async remove(template: ObjectId, user: ObjectId): Promise<DeleteResult> {
     // id in templateIDs
     // id.templates := none
     // templateIDs -= id
@@ -62,7 +62,7 @@ export default class TemplatingConcept {
     } else if (!request.user.equals(user)) {
       throw new TemplateNotAllowedError(template);
     }
-    await this.templates.deleteOne(template);
+    return await this.templates.deleteOne(template);
   }
 
   async render(template: ObjectId, data: Map<string, ObjectId>): Promise<ObjectId> {

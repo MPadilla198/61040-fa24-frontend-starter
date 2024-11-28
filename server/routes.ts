@@ -6,11 +6,40 @@ import { Router, getExpressRouter } from "./framework/router";
 import { Authing, Friending, Labelling, Sessioning, Sorting, Sourcing } from "./app";
 import { PostOptions } from "./concepts/posting";
 import { SessionDoc } from "./concepts/sessioning";
-import Responses from "./responses";
+import Responses, { BaseResponse } from "./responses";
 
-import { Label, SourceTarget } from "./concepts/types";
+import { StatusCodes } from "http-status-codes";
+
+import { SourceTarget } from "./concepts/types";
 
 import { z } from "zod";
+
+class Schema {
+  static readonly ObjectId = z.string();
+  static readonly Session = z.object({
+    cookie: z.object({
+      originalMaxAge: z.number().nullable(),
+
+      maxAge: z.number().optional(),
+      signed: z.boolean().optional(),
+      expires: z.date().nullable().optional(),
+      httpOnly: z.boolean().optional(),
+      path: z.string().optional(),
+      domain: z.string().optional(),
+      secure: z.union([z.boolean(), z.enum(["auto"])]).optional(),
+      sameSite: z.union([z.boolean(), z.enum(["lax", "strict", "none"])]).optional(),
+    }),
+    user: Schema.ObjectId.optional(),
+  });
+  static readonly Username = z.string().min(1);
+  static readonly Password = z.string();
+  static readonly PostAuthor = z.string();
+  static readonly PostContent = z.string();
+  static readonly URI = z.string();
+  static readonly SourceTarget = z.nativeEnum(SourceTarget);
+  static readonly Label = z.string();
+  static readonly LabelWeight = z.number();
+}
 
 /**
  * Web server routes for the app. Implements synchronizations between concepts.
@@ -19,58 +48,66 @@ class Routes {
   // Synchronize the concepts from `app.ts`.
 
   @Router.get("/session")
-  async getSessionUser(session: SessionDoc) {
+  @Router.validate(z.object({ session: Schema.Session }).strict())
+  async getSessionUser(session: SessionDoc): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
-    return await Authing.getUserById(user);
+    return { HTTP_CODE: StatusCodes.OK, body: await Authing.getUserById(user) };
   }
 
   @Router.get("/users")
-  async getUsers() {
-    return await Authing.getUsers();
+  @Router.validate(z.never())
+  async getUsers(): Promise<BaseResponse> {
+    return { HTTP_CODE: StatusCodes.OK, body: await Authing.getUsers() };
   }
 
   @Router.get("/users/:username")
-  @Router.validate(z.object({ username: z.string().min(1) }))
-  async getUser(username: string) {
-    return await Authing.getUserByUsername(username);
+  @Router.validate(z.object({ username: Schema.Username }).strict())
+  async getUser(username: string): Promise<BaseResponse> {
+    return { HTTP_CODE: StatusCodes.OK, body: await Authing.getUserByUsername(username) };
   }
 
   @Router.post("/users")
-  async createUser(session: SessionDoc, username: string, password: string) {
+  @Router.validate(z.object({ session: Schema.Session, username: Schema.Username, password: Schema.Password }).strict())
+  async createUser(session: SessionDoc, username: string, password: string): Promise<BaseResponse> {
     Sessioning.isLoggedOut(session);
-    return await Authing.create(username, password);
+    return { HTTP_CODE: StatusCodes.CREATED, msg: "User created successfully!", body: await Authing.register(username, password) };
   }
 
   @Router.patch("/users/username")
-  async updateUsername(session: SessionDoc, username: string) {
+  @Router.validate(z.object({ session: Schema.Session, username: Schema.Username }).strict())
+  async updateUsername(session: SessionDoc, username: string): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
-    return await Authing.updateUsername(user, username);
+    return { HTTP_CODE: StatusCodes.OK, msg: "Username updated successfully!", body: await Authing.updateUsername(user, username) };
   }
 
   @Router.patch("/users/password")
-  async updatePassword(session: SessionDoc, currentPassword: string, newPassword: string) {
+  @Router.validate(z.object({ session: Schema.Session, currentPassword: Schema.Password, newPassword: Schema.Password }).strict())
+  async updatePassword(session: SessionDoc, currentPassword: string, newPassword: string): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
-    return Authing.updatePassword(user, currentPassword, newPassword);
+    return { HTTP_CODE: StatusCodes.OK, msg: "Password updated successfully!", body: await Authing.updatePassword(user, currentPassword, newPassword) };
   }
 
   @Router.delete("/users")
-  async deleteUser(session: SessionDoc) {
+  @Router.validate(z.object({ session: Schema.Session }).strict())
+  async deleteUser(session: SessionDoc): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
     Sessioning.end(session);
-    return await Authing.delete(user);
+    return { HTTP_CODE: StatusCodes.OK, body: await Authing.delete(user) };
   }
 
   @Router.post("/login")
-  async logIn(session: SessionDoc, username: string, password: string) {
+  @Router.validate(z.object({ session: Schema.Session, username: Schema.Username, password: Schema.Password }).strict())
+  async logIn(session: SessionDoc, username: string, password: string): Promise<BaseResponse> {
     const u = await Authing.authenticate(username, password);
-    Sessioning.start(session, u._id);
-    return { msg: "Logged in!" };
+    Sessioning.start(session, u);
+    return { HTTP_CODE: StatusCodes.OK, msg: "Logged in!" };
   }
 
   @Router.post("/logout")
-  async logOut(session: SessionDoc) {
+  @Router.validate(z.object({ session: Schema.Session }).strict())
+  async logOut(session: SessionDoc): Promise<BaseResponse> {
     Sessioning.end(session);
-    return { msg: "Logged out!" };
+    return { HTTP_CODE: StatusCodes.OK, msg: "Logged out!" };
   }
 
   /*****
@@ -78,39 +115,28 @@ class Routes {
    */
 
   @Router.get("/posts")
-  @Router.validate(z.object({ author: z.string().optional() }))
-  async getPosts(author?: string) {
-    // let posts;
-    // if (author) {
-    //   const id = (await Authing.getUserByUsername(author))._id;
-    //   posts = await Posting.getByAuthor(id);
-    // } else {
-    //   posts = await Posting.getPosts();
-    // }
-    // // return Responses.posts(posts);
+  @Router.validate(z.object({ author: Schema.PostAuthor.optional() }))
+  async getPosts(author?: string): Promise<BaseResponse> {
+    return;
   }
 
   @Router.post("/posts")
-  async createPost(session: SessionDoc, content: string, options?: PostOptions) {
+  @Router.validate(z.object({ session: Schema.Session, content: Schema.PostContent }))
+  async createPost(session: SessionDoc, content: string, options?: PostOptions): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
-    // const created = await Posting.create(user, content, options);
-    // return { msg: created.msg, post: await Responses.post(created.post) };
+    return;
   }
 
-  @Router.patch("/posts/:id")
-  async updatePost(session: SessionDoc, id: string, content?: string, options?: PostOptions) {
-    // const user = Sessioning.getUser(session);
-    // const oid = new ObjectId(id);
-    // await Posting.assertAuthorIsUser(oid, user);
-    // return await Posting.update(oid, content, options);
+  @Router.patch("/posts/:postId")
+  @Router.validate(z.object({ session: Schema.Session, postId: Schema.ObjectId, content: Schema.PostContent.optional() }))
+  async updatePost(session: SessionDoc, postId: string, content?: string, options?: PostOptions): Promise<BaseResponse> {
+    return;
   }
 
-  @Router.delete("/posts/:id")
-  async deletePost(session: SessionDoc, id: string) {
-    // const user = Sessioning.getUser(session);
-    // const oid = new ObjectId(id);
-    // await Posting.assertAuthorIsUser(oid, user);
-    // // return Posting.delete(oid);
+  @Router.delete("/posts/:postId")
+  @Router.validate(z.object({ session: Schema.Session, postId: Schema.ObjectId }))
+  async deletePost(session: SessionDoc, postId: string): Promise<BaseResponse> {
+    return;
   }
 
   /*****
@@ -118,47 +144,54 @@ class Routes {
    */
 
   @Router.get("/friends")
-  async getFriends(session: SessionDoc) {
+  @Router.validate(z.object({ session: Schema.Session }))
+  async getFriends(session: SessionDoc): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
     return await Authing.idsToUsernames(await Friending.getFriends(user));
   }
 
   @Router.delete("/friends/:friend")
-  async removeFriend(session: SessionDoc, friend: string) {
+  @Router.validate(z.object({ session: Schema.Session, friend: Schema.Username }))
+  async deleteFriendship(session: SessionDoc, friend: string): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
     const friendOid = (await Authing.getUserByUsername(friend))._id;
     return await Friending.removeFriend(user, friendOid);
   }
 
   @Router.get("/friend/requests")
-  async getRequests(session: SessionDoc) {
+  @Router.validate(z.object({ session: Schema.Session }))
+  async getRequests(session: SessionDoc): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
     return await Responses.friendRequests(await Friending.getRequests(user));
   }
 
   @Router.post("/friend/requests/:to")
-  async sendFriendRequest(session: SessionDoc, to: string) {
+  @Router.validate(z.object({ session: Schema.Session, to: Schema.Username }))
+  async createFriendRequest(session: SessionDoc, to: string): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
     const toOid = (await Authing.getUserByUsername(to))._id;
-    return await Friending.sendRequest(user, toOid);
+    return await Friending.createRequest(user, toOid);
   }
 
   @Router.delete("/friend/requests/:to")
-  async removeFriendRequest(session: SessionDoc, to: string) {
+  @Router.validate(z.object({ session: Schema.Session, to: Schema.Username }))
+  async deleteFriendRequest(session: SessionDoc, to: string): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
     const toOid = (await Authing.getUserByUsername(to))._id;
     return await Friending.removeRequest(user, toOid);
   }
 
   @Router.put("/friend/accept/:from")
-  async acceptFriendRequest(session: SessionDoc, from: string) {
+  @Router.validate(z.object({ session: Schema.Session, from: Schema.Username }))
+  async acceptFriendRequest(session: SessionDoc, from: string): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
     const fromOid = (await Authing.getUserByUsername(from))._id;
     return await Friending.acceptRequest(fromOid, user);
   }
 
   @Router.put("/friend/reject/:from")
-  async rejectFriendRequest(session: SessionDoc, from: string) {
+  @Router.validate(z.object({ session: Schema.Session, from: Schema.Username }))
+  async rejectFriendRequest(session: SessionDoc, from: string): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
     const fromOid = (await Authing.getUserByUsername(from))._id;
     return await Friending.rejectRequest(fromOid, user);
@@ -169,27 +202,31 @@ class Routes {
    */
 
   @Router.post("/source/:target")
-  async addSource(session: SessionDoc, path_uri: string, target: SourceTarget): Promise<ObjectId> {
+  @Router.validate(z.object({ session: Schema.Session, pathUri: Schema.URI, target: Schema.SourceTarget }))
+  async addSource(session: SessionDoc, pathUri: string, target: SourceTarget): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
-    return await Sourcing.register(target, path_uri, user);
+    return await Sourcing.register(target, pathUri, user);
   }
 
   @Router.get("/source")
-  async getSources(session: SessionDoc) {
+  @Router.validate(z.object({ session: Schema.Session }))
+  async getSources(session: SessionDoc): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
-    return await Sourcing.lookupSources(user);
+    return await Sourcing.lookupMany(user);
   }
 
   @Router.get("/source/:sourceId")
-  async getSourceContent(session: SessionDoc, sourceId: ObjectId) {
+  @Router.validate(z.object({ session: Schema.Session, sourceId: Schema.ObjectId }))
+  async getSourceContent(session: SessionDoc, sourceId: string): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
-    return await Sourcing.lookupSource(sourceId, user);
+    return await Sourcing.lookupOne(new ObjectId(sourceId), user);
   }
 
   @Router.delete("/source/:sourceId")
-  async removeSource(session: SessionDoc, sourceId: ObjectId) {
+  @Router.validate(z.object({ session: Schema.Session, sourceId: Schema.ObjectId }))
+  async deleteSource(session: SessionDoc, sourceId: string): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
-    return await Sourcing.unregister(sourceId, user);
+    return await Sourcing.unregister(new ObjectId(sourceId), user);
   }
 
   /*****
@@ -197,31 +234,28 @@ class Routes {
    */
 
   @Router.post("/label/:label/:weight")
-  @Router.validate(z.object({ label: z.string(), weight: z.number() }))
-  async newLabel(session: SessionDoc, label: Label, weight: number) {
+  @Router.validate(z.object({ session: Schema.Session, label: Schema.Label, weight: Schema.LabelWeight }))
+  async newLabel(session: SessionDoc, label: string, weight: number): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
     const labelId = await Labelling.register(label, user);
-    return await Sorting.add(labelId, label, weight, user);
+    await Sorting.add(sortId, label, weight, user);
   }
 
   @Router.put("/label/:label/:weight")
-  @Router.validate(z.object({ label: z.string(), weight: z.number() }))
-  async setLabel(session: SessionDoc, label: Label, weight: number) {
+  @Router.validate(z.object({ session: Schema.Session, label: Schema.Label, weight: Schema.LabelWeight }))
+  async setLabel(session: SessionDoc, label: string, weight: number): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
-    const labelId = await Labelling.lookup(label, user);
-    return await Sorting.set(labelId._id, label, weight, user);
+    const labelId = (await Labelling.lookup(label, user))._id;
+    await Sorting.set(labelId, label, weight, user);
   }
 
-  // @Router.delete("/label/:label")
-  // @Router.validate(z.object({ label: z.string() }))
-  // async deleteLabel(session: SessionDoc, label: Label) {
-  //   const user = Sessioning.getUser(session);
-  //   const la
-  // }
+  @Router.delete("/label/:label")
+  @Router.validate(z.object({ session: Schema.Session, label: Schema.Label }))
+  async deleteLabel(session: SessionDoc, label: string) {}
 
   @Router.put("/label/:label/:postID")
-  @Router.validate(z.object({ label: z.string() }))
-  async addLabel(session: SessionDoc, label: string, postID: ObjectId) {
+  @Router.validate(z.object({ session: Schema.Session, label: Schema.Label, postId: Schema.ObjectId }))
+  async addLabel(session: SessionDoc, label: string, postID: ObjectId): Promise<BaseResponse> {
     const user = Sessioning.getUser(session);
     return await Labelling.add(postID, label, user);
   }
@@ -231,14 +265,14 @@ class Routes {
    */
 
   @Router.put("/template/:targets")
-  async addTemplate(session: SessionDoc, targets: SourceTarget[]) {}
+  async addTemplate(session: SessionDoc, targets: SourceTarget[]): Promise<BaseResponse> {}
 
   /*****
    * Sorting
    */
 
   @Router.put("/template/remove/:id")
-  async removeTemplate(session: SessionDoc, id: string) {}
+  async removeTemplate(session: SessionDoc, id: string): Promise<BaseResponse> {}
 }
 
 /** The web app. */

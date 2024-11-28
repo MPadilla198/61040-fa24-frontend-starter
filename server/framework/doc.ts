@@ -16,6 +16,7 @@ import {
 } from "mongodb";
 
 import db from "../db";
+import { NotAllowedError, NotFoundError } from "./errors";
 
 export interface BaseDoc {
   _id: ObjectId;
@@ -139,13 +140,11 @@ export default class DocCollection<Schema extends BaseDoc> {
 
   /**
    * Pop one document that matches `filter`, equivalent to calling `readOne` and `deleteOne`.
-   * @returns the document, or `null` if no document matches
+   * @returns the document
+   * @throws {NotFoundError} if no document matches
    */
-  async popOne(filter: Filter<Schema>): Promise<Schema | null> {
-    const one = await this.readOne(filter);
-    if (one === null) {
-      return null;
-    }
+  async popOne(filter: Filter<Schema>): Promise<Schema> {
+    const one: Schema = await this.assertDoesExist(await this.readOne(filter));
     await this.deleteOne({ _id: one._id } as Filter<Schema>);
     return one;
   }
@@ -153,4 +152,25 @@ export default class DocCollection<Schema extends BaseDoc> {
   /*
    * You may wish to add more methods, e.g. using other MongoDB operations!
    */
+
+  /**
+   * Checks for the existence of a document with `filter`
+   * @throws {NotFoundError} Will throw an error if document does not exist.
+   */
+  async assertDoesExist(schema: Schema | null): Promise<Schema> {
+    if (schema === null) {
+      throw new NotFoundError(`Resource not found!`);
+    }
+    return schema;
+  }
+
+  /**
+   * Checks for the lack of existence of a document with `filter` attributes.
+   * @throws {NotAllowedError} Will throw an error if document exists.
+   */
+  async assertDoesNotExist(schema: Schema | null): Promise<void> {
+    if (schema !== null) {
+      throw new NotAllowedError(`Resource is not allowed!`);
+    }
+  }
 }

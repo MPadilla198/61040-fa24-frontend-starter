@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { Filter, ObjectId } from "mongodb";
+import { DeleteResult, Filter, ObjectId } from "mongodb";
 import DocCollection, { BaseDoc } from "../framework/doc";
-import { NotAllowedError, NotFoundError, NotImplementedError } from "./errors";
+import { NotAllowedError, NotFoundError, NotImplementedError } from "../framework/errors";
 import { SourceTarget } from "./types";
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
@@ -17,12 +17,12 @@ export interface SourceDoc extends BaseDoc {
 
 export interface ContentDoc extends BaseDoc {
   user: ObjectId;
-  contentID: ObjectId;
-  data: ObjectId;
+  source: ObjectId;
+  body?: string;
 }
 
 /**
- * concept: Sourcing [Target]
+ * concept: Sourcing [User]
  */
 export default class SourcingConcept {
   public readonly sources: DocCollection<SourceDoc>;
@@ -36,6 +36,13 @@ export default class SourcingConcept {
     this.content = new DocCollection<ContentDoc>(collectionName);
   }
 
+  /**
+   *
+   * @param {SourceTarget} target
+   * @param {string} uri
+   * @param {ObjectId} user
+   * @returns {Promise<ObjectId>}
+   */
   async register(target: SourceTarget, uri: string, user: ObjectId): Promise<ObjectId> {
     // id not in sourceIDs
     // sourceIDs += id
@@ -50,7 +57,12 @@ export default class SourcingConcept {
     return source;
   }
 
-  async unregister(sourceID: ObjectId, user: ObjectId): Promise<void> {
+  /**
+   *
+   * @param {ObjectId} sourceID
+   * @param {ObjectId} user
+   */
+  async unregister(sourceID: ObjectId, user: ObjectId): Promise<DeleteResult> {
     // id in sourceIDs
     // sourceIDs -= id
     // id.source := none
@@ -61,10 +73,16 @@ export default class SourcingConcept {
       throw new SourceNotFoundError(sourceID);
     }
     await this.assertUserOwns(result, user);
-    await this.sources.deleteOne(sourceID);
+    return await this.sources.deleteOne(sourceID);
   }
 
-  async lookupSource(sourceID: ObjectId, user: ObjectId): Promise<SourceDoc> {
+  /**
+   *
+   * @param sourceID
+   * @param user
+   * @returns
+   */
+  async lookupOne(sourceID: ObjectId, user: ObjectId): Promise<SourceDoc> {
     // id in sourceIDs
     // t := id.sources
     await this.assertSourceExists(sourceID); // When uncommented, the linter does not recognize the assert
@@ -77,7 +95,12 @@ export default class SourcingConcept {
     return result;
   }
 
-  async lookupSources(user: ObjectId): Promise<SourceDoc[]> {
+  /**
+   *
+   * @param user
+   * @returns
+   */
+  async lookupMany(user: ObjectId): Promise<SourceDoc[]> {
     const result = await this.sources.readMany({ user });
     if (result == null) {
       throw new SourceNotFoundError({ user });
@@ -86,6 +109,12 @@ export default class SourcingConcept {
     return result;
   }
 
+  /**
+   *
+   * @param contentID
+   * @param user
+   * @returns
+   */
   async get(contentID: ObjectId, user: ObjectId): Promise<ContentDoc> {
     // id in contentIDs
     // t := id.content
@@ -99,7 +128,11 @@ export default class SourcingConcept {
     return result;
   }
 
-  async update(sourceID: ObjectId) {
+  /**
+   *
+   * @param sourceID
+   */
+  async update(sourceID: ObjectId): Promise<void> {
     // id in sourceIDs
     // contentID not in contentIDs
     // id.content += contentID

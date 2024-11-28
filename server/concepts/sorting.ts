@@ -2,13 +2,13 @@
 /* eslint-disable @typescript-eslint/no-empty-object-type */
 import { ObjectId } from "mongodb";
 import DocCollection, { BaseDoc } from "../framework/doc";
-import { LabelNotAllowedError, LabelNotFoundError, NotAllowedError, NotFoundError, NotImplementedError } from "./errors";
+import { LabelNotAllowedError, LabelNotFoundError, NotAllowedError, NotFoundError, NotImplementedError } from "../framework/errors";
 import { Label } from "./types";
 
 export interface SortingOptions {}
 
 export interface SortDoc extends BaseDoc {
-  user: ObjectId;
+  owner: ObjectId;
   weights: Map<Label, number>;
   options?: SortingOptions;
 }

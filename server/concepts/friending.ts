@@ -1,6 +1,6 @@
 import { ObjectId } from "mongodb";
 import DocCollection, { BaseDoc } from "../framework/doc";
-import { NotAllowedError, NotFoundError } from "./errors";
+import { NotAllowedError, NotFoundError } from "../framework/errors";
 
 export interface FriendshipDoc extends BaseDoc {
   user1: ObjectId;
@@ -28,49 +28,83 @@ export default class FriendingConcept {
     this.requests = new DocCollection<FriendRequestDoc>(collectionName + "_requests");
   }
 
-  async getRequests(user: ObjectId) {
+  /**
+   * Get the friendship requests that include `user`.
+   * @param {ObjectId} user
+   * @returns {Promise<FriendRequestDoc[]>}
+   */
+  async getRequests(user: ObjectId): Promise<FriendRequestDoc[]> {
     return await this.requests.readMany({
       $or: [{ from: user }, { to: user }],
     });
   }
 
-  async sendRequest(from: ObjectId, to: ObjectId) {
+  /**
+   * Create new friendship request.
+   * @param {ObjectId} from The `User` initiating the request.
+   * @param {ObjectId} to The `User` receiving the request.
+   * @returns {Promise<ObjectId>} The Id of the `Request`.
+   */
+  async createRequest(from: ObjectId, to: ObjectId): Promise<ObjectId> {
     await this.canSendRequest(from, to);
-    await this.requests.createOne({ from, to, status: "pending" });
-    return { msg: "Sent request!" };
+    return await this.requests.createOne({ from, to, status: "pending" });
   }
 
-  async acceptRequest(from: ObjectId, to: ObjectId) {
+  /**
+   * Accept a friendship request.
+   * @param {ObjectId} from The `User` that initiated the request.
+   * @param {ObjectId} to The `User` that received the request.
+   * @returns {Promise<[ObjectId, ObjectId]>} A tuple [requestId, friendId].
+   */
+  async acceptRequest(from: ObjectId, to: ObjectId): Promise<[ObjectId, ObjectId]> {
     await this.removePendingRequest(from, to);
-    await Promise.all([this.requests.createOne({ from, to, status: "accepted" }), this.addFriend(from, to)]);
-    return { msg: "Accepted request!" };
+    return await Promise.all([this.requests.createOne({ from, to, status: "accepted" }), this.addFriend(from, to)]);
   }
 
-  async rejectRequest(from: ObjectId, to: ObjectId) {
+  /**
+   * Reject a friendship request.
+   * @param {ObjectId} from The `User` that initiated the request.
+   * @param {ObjectId} to The `User` that received the request.
+   * @returns {ObjectId} The Id of a new "rejected" request.
+   */
+  async rejectRequest(from: ObjectId, to: ObjectId): Promise<ObjectId> {
     await this.removePendingRequest(from, to);
-    await this.requests.createOne({ from, to, status: "rejected" });
-    return { msg: "Rejected request!" };
+    return await this.requests.createOne({ from, to, status: "rejected" });
   }
 
-  async removeRequest(from: ObjectId, to: ObjectId) {
+  /**
+   * Remove a friendship request.
+   * @param {ObjectId} from The `User` that initiated the request.
+   * @param {ObjectId} to The `User` that received the request.
+   */
+  async removeRequest(from: ObjectId, to: ObjectId): Promise<void> {
     await this.removePendingRequest(from, to);
-    return { msg: "Removed request!" };
   }
 
-  async removeFriend(user: ObjectId, friend: ObjectId) {
-    const friendship = await this.friends.popOne({
-      $or: [
-        { user1: user, user2: friend },
-        { user1: friend, user2: user },
-      ],
-    });
-    if (friendship === null) {
-      throw new FriendNotFoundError(user, friend);
+  /**
+   * Remove a freindship, initiated by `user`.
+   * @param {ObjectId} user The `User` initiating the removal.
+   * @param {ObjectId} friend The friend that is being removed.
+   */
+  async removeFriend(user: ObjectId, friend: ObjectId): Promise<void> {
+    try {
+      await this.friends.popOne({
+        $or: [
+          { user1: user, user2: friend },
+          { user1: friend, user2: user },
+        ],
+      });
+    } catch (e) {
+      throw e instanceof NotFoundError ? new FriendNotFoundError(user, friend) : e;
     }
-    return { msg: "Unfriended!" };
   }
 
-  async getFriends(user: ObjectId) {
+  /**
+   * Get the list of `Friend`s of `user`.
+   * @param {ObjectId} user
+   * @returns {ObjectId[]}
+   */
+  async getFriends(user: ObjectId): Promise<ObjectId[]> {
     const friendships = await this.friends.readMany({
       $or: [{ user1: user }, { user2: user }],
     });
@@ -78,16 +112,16 @@ export default class FriendingConcept {
     return friendships.map((friendship) => (friendship.user1.toString() === user.toString() ? friendship.user2 : friendship.user1));
   }
 
-  private async addFriend(user1: ObjectId, user2: ObjectId) {
-    void this.friends.createOne({ user1, user2 });
+  private async addFriend(user1: ObjectId, user2: ObjectId): Promise<ObjectId> {
+    return this.friends.createOne({ user1, user2 });
   }
 
   private async removePendingRequest(from: ObjectId, to: ObjectId) {
-    const request = await this.requests.popOne({ from, to, status: "pending" });
-    if (request === null) {
-      throw new FriendRequestNotFoundError(from, to);
+    try {
+      return await this.requests.popOne({ from, to, status: "pending" });
+    } catch (e) {
+      throw e instanceof NotFoundError ? new FriendRequestNotFoundError(from, to) : e;
     }
-    return request;
   }
 
   private async assertNotFriends(u1: ObjectId, u2: ObjectId) {
